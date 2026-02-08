@@ -219,6 +219,45 @@
           groundBounce: 0.28,
           groundFriction: 0.9,
           rollFriction: 2.2,
+          boostBase: 0.875,
+          boostRange: 0.55,
+          hitRadiusMultiplier: 1.0,
+          maxVx: Infinity,
+          airDrag: 0,
+        };
+
+        const updateSettings = () => {
+          if (width < 600) {
+            Object.assign(settings, {
+              gravity: 1200,
+              kick: 580,
+              sideKick: 280,
+              wallBounce: 0.6,
+              groundBounce: 0.25,
+              groundFriction: 0.85,
+              rollFriction: 2.5,
+              boostBase: 0.9,
+              boostRange: 0.25,
+              hitRadiusMultiplier: 1.8,
+              maxVx: width * 0.8,
+              airDrag: 0.5,
+            });
+          } else {
+            Object.assign(settings, {
+              gravity: 1700,
+              kick: 820,
+              sideKick: 520,
+              wallBounce: 0.985,
+              groundBounce: 0.28,
+              groundFriction: 0.9,
+              rollFriction: 2.2,
+              boostBase: 0.875,
+              boostRange: 0.55,
+              hitRadiusMultiplier: 1.0,
+              maxVx: Infinity,
+              airDrag: 0,
+            });
+          }
         };
 
         const ball = {
@@ -498,6 +537,7 @@
             ? Math.max(28, Math.min(width, height) * 0.06)
             : Math.max(20, Math.min(width, height) * 0.045);
           groundY = height - Math.max(80, height * 0.11);
+          updateSettings();
           resetBall();
         };
 
@@ -638,10 +678,11 @@
           const dy = clickY - ball.y;
           const distance = Math.hypot(dx, dy);
           const radial = clamp(distance / ball.r, 0, 1);
-          const boost = 0.875 + radial * 0.55;
+          const boost = settings.boostBase + radial * settings.boostRange;
           const normalizedX = clamp(dx / ball.r, -1, 1);
 
           ball.vx += -normalizedX * settings.sideKick * boost;
+          ball.vx = clamp(ball.vx, -settings.maxVx, settings.maxVx);
           ball.vy = -settings.kick * boost;
           const wasNotRecord = state.score <= state.best;
           state.score += 1;
@@ -684,7 +725,8 @@
           const dx = clickX - ball.x;
           const dy = clickY - ball.y;
 
-          if (Math.hypot(dx, dy) > ball.r) {
+          const hitRadius = ball.r * settings.hitRadiusMultiplier;
+          if (Math.hypot(dx, dy) > hitRadius) {
             return;
           }
 
@@ -741,6 +783,15 @@
             if (ball.x + ball.r >= width) {
               ball.x = width - ball.r;
               ball.vx = -Math.abs(ball.vx) * settings.wallBounce;
+            }
+
+            if (ball.y - ball.r < 0) {
+              ball.y = ball.r;
+              ball.vy = Math.abs(ball.vy) * 0.3;
+            }
+
+            if (settings.airDrag > 0) {
+              ball.vx *= 1 - settings.airDrag * delta;
             }
 
             if (ball.y + ball.r >= groundY) {
