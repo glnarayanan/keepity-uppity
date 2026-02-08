@@ -1,5 +1,5 @@
 # Warp Log
 
 ## 2026-02-08
-- Summary: Simplified the Keepy Uppy game into a clean single-file canvas implementation, fixed rendering visibility, and removed lint/test/tooling extras and extra docs.
-- Tests: Not run (removed testing/tooling).
+- Summary: Tuned the physics to include variable kick strength, near-invisible wall damping, ground settling/rolling, added haptic cues, swapped to a cream background, and redrew the ball with a classic soccer pattern.
+- Tests: Not run (manual browser run only).

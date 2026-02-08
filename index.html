@@ -6,7 +6,7 @@
     <title>Keepy Uppy</title>
     <style>
       :root {
-        --bg: #ffffff;
+        --bg: #f6f1e7;
         --ink: #111111;
         --line: #dedede;
       }
@@ -53,6 +53,7 @@
         transform: translateX(-50%);
         font-size: 14px;
         color: #555555;
+        transition: opacity 0.2s ease;
       }
 
       #hint.hidden {
@@ -77,18 +78,27 @@
         const hintEl = document.getElementById("hint");
 
         const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+        const vibrate = (pattern) => {
+          if (navigator.vibrate) {
+            navigator.vibrate(pattern);
+          }
+        };
 
         const state = {
-          active: false,
+          mode: "idle",
           score: 0,
           best: 0,
+          settleTime: 0,
         };
 
         const settings = {
           gravity: 1700,
           kick: 820,
           sideKick: 520,
-          wallBounce: 0.65,
+          wallBounce: 0.985,
+          groundBounce: 0.28,
+          groundFriction: 0.9,
+          rollFriction: 2.2,
         };
 
         const ball = {
@@ -97,6 +107,7 @@
           vx: 0,
           vy: 0,
           r: 24,
+          spin: 0,
         };
 
         let width = 0;
@@ -120,7 +131,7 @@
           try {
             localStorage.setItem(highScoreKey, String(state.best));
           } catch (error) {
-            // Ignore storage failures (private mode / file restrictions).
+            // Ignore storage failures.
           }
         };
 
@@ -134,11 +145,13 @@
           ball.y = groundY - ball.r;
           ball.vx = 0;
           ball.vy = 0;
+          ball.spin = 0;
         };
 
         const resetGame = () => {
-          state.active = false;
+          state.mode = "idle";
           state.score = 0;
+          state.settleTime = 0;
           hintEl.classList.remove("hidden");
           resetBall();
           syncHud();
@@ -156,9 +169,20 @@
           resetBall();
         };
 
+        const drawPentagon = (radius) => {
+          ctx.beginPath();
+          for (let i = 0; i < 5; i += 1) {
+            const angle = (Math.PI * 2 * i) / 5 - Math.PI / 2;
+            ctx.lineTo(Math.cos(angle) * radius, Math.sin(angle) * radius);
+          }
+          ctx.closePath();
+          ctx.fill();
+        };
+
         const drawBall = () => {
           ctx.save();
           ctx.translate(ball.x, ball.y);
+          ctx.rotate(ball.spin);
 
           ctx.beginPath();
           ctx.arc(0, 0, ball.r, 0, Math.PI * 2);
@@ -169,14 +193,26 @@
           ctx.stroke();
 
           ctx.fillStyle = "#111111";
-          const patch = ball.r * 0.18;
+          drawPentagon(ball.r * 0.38);
+
           for (let i = 0; i < 5; i += 1) {
             const angle = (Math.PI * 2 * i) / 5 - Math.PI / 2;
-            const px = Math.cos(angle) * ball.r * 0.5;
-            const py = Math.sin(angle) * ball.r * 0.5;
+            const ringRadius = ball.r * 0.63;
+            ctx.save();
+            ctx.translate(Math.cos(angle) * ringRadius, Math.sin(angle) * ringRadius);
+            ctx.rotate(angle);
+            drawPentagon(ball.r * 0.22);
+            ctx.restore();
+          }
+
+          ctx.strokeStyle = "rgba(17, 17, 17, 0.4)";
+          ctx.lineWidth = 1;
+          for (let i = 0; i < 5; i += 1) {
+            const angle = (Math.PI * 2 * i) / 5 - Math.PI / 2;
             ctx.beginPath();
-            ctx.arc(px, py, patch, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(Math.cos(angle) * ball.r * 0.63, Math.sin(angle) * ball.r * 0.63);
+            ctx.stroke();
           }
 
           ctx.restore();
@@ -199,16 +235,26 @@
           drawBall();
         };
 
-        const applyKick = (clickX) => {
-          const normalized = clamp((clickX - ball.x) / ball.r, -1, 1);
-          ball.vx += -normalized * settings.sideKick;
-          ball.vy = -settings.kick;
+        const applyKick = (clickX, clickY, pressure) => {
+          const dx = clickX - ball.x;
+          const dy = clickY - ball.y;
+          const distance = Math.hypot(dx, dy);
+          const radial = clamp(distance / ball.r, 0, 1);
+          const press = clamp(typeof pressure === "number" ? pressure || 0.5 : 0.5, 0, 1);
+          const boost = 0.75 + radial * 0.55 + press * 0.25;
+          const normalizedX = clamp(dx / ball.r, -1, 1);
+
+          ball.vx += -normalizedX * settings.sideKick * boost;
+          ball.vy = -settings.kick * boost;
           state.score += 1;
+
           if (state.score > state.best) {
             state.best = state.score;
             saveHighScore();
           }
+
           syncHud();
+          vibrate(8);
         };
 
         const handlePointer = (event) => {
@@ -222,22 +268,34 @@
             return;
           }
 
-          if (!state.active) {
-            state.active = true;
+          if (state.mode !== "active") {
+            state.mode = "active";
+            state.settleTime = 0;
             hintEl.classList.add("hidden");
           }
 
-          applyKick(clickX);
+          applyKick(clickX, clickY, event.pressure);
+        };
+
+        const handleGroundImpact = () => {
+          if (state.mode === "active") {
+            state.mode = "settling";
+            state.score = 0;
+            syncHud();
+            hintEl.classList.remove("hidden");
+            vibrate(18);
+          }
         };
 
         const update = (time) => {
           const delta = Math.min(0.032, (time - lastTime) / 1000);
           lastTime = time;
 
-          if (state.active) {
+          if (state.mode !== "idle") {
             ball.vy += settings.gravity * delta;
             ball.x += ball.vx * delta;
             ball.y += ball.vy * delta;
+            ball.spin += (ball.vx / ball.r) * delta;
 
             if (ball.x - ball.r <= 0) {
               ball.x = ball.r;
@@ -250,7 +308,32 @@
             }
 
             if (ball.y + ball.r >= groundY) {
-              resetGame();
+              ball.y = groundY - ball.r;
+
+              if (ball.vy > 0) {
+                ball.vy = -ball.vy * settings.groundBounce;
+                ball.vx *= settings.groundFriction;
+                handleGroundImpact();
+              }
+
+              if (Math.abs(ball.vy) < 40) {
+                ball.vy = 0;
+              }
+
+              const rollDrag = Math.max(0, 1 - settings.rollFriction * delta);
+              ball.vx *= rollDrag;
+
+              if (state.mode === "settling") {
+                if (Math.abs(ball.vx) < 6 && ball.vy === 0) {
+                  state.settleTime += delta;
+                } else {
+                  state.settleTime = 0;
+                }
+
+                if (state.settleTime > 0.7) {
+                  resetGame();
+                }
+              }
             }
           }
 
