@@ -169,14 +169,27 @@
           resetBall();
         };
 
-        const drawPentagon = (radius) => {
+        const drawPolygon = (sides, radius) => {
           ctx.beginPath();
-          for (let i = 0; i < 5; i += 1) {
-            const angle = (Math.PI * 2 * i) / 5 - Math.PI / 2;
+          for (let i = 0; i < sides; i += 1) {
+            const angle = (Math.PI * 2 * i) / sides - Math.PI / 2;
             ctx.lineTo(Math.cos(angle) * radius, Math.sin(angle) * radius);
           }
           ctx.closePath();
+        };
+
+        const drawShadow = () => {
+          const height = clamp((groundY - (ball.y + ball.r)) / (ball.r * 3), 0, 1);
+          const shadowScale = 1 - height * 0.5;
+          const shadowAlpha = 0.25 * (1 - height);
+          ctx.save();
+          ctx.translate(ball.x, groundY + ball.r * 0.12);
+          ctx.scale(1, 0.25);
+          ctx.beginPath();
+          ctx.arc(0, 0, ball.r * shadowScale, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(0, 0, 0, ${shadowAlpha.toFixed(3)})`;
           ctx.fill();
+          ctx.restore();
         };
 
         const drawBall = () => {
@@ -184,38 +197,94 @@
           ctx.translate(ball.x, ball.y);
           ctx.rotate(ball.spin);
 
+          const baseGradient = ctx.createRadialGradient(
+            -ball.r * 0.35,
+            -ball.r * 0.35,
+            ball.r * 0.2,
+            0,
+            0,
+            ball.r * 1.2
+          );
+          baseGradient.addColorStop(0, "#ffffff");
+          baseGradient.addColorStop(0.6, "#f0f0f0");
+          baseGradient.addColorStop(1, "#d7d7d7");
+
           ctx.beginPath();
           ctx.arc(0, 0, ball.r, 0, Math.PI * 2);
-          ctx.fillStyle = "#ffffff";
+          ctx.fillStyle = baseGradient;
           ctx.fill();
           ctx.lineWidth = 2;
           ctx.strokeStyle = "#111111";
           ctx.stroke();
 
-          ctx.fillStyle = "#111111";
-          drawPentagon(ball.r * 0.38);
+          const panelStroke = "rgba(120, 120, 120, 0.55)";
+          const blackPanel = ctx.createLinearGradient(-ball.r, -ball.r, ball.r, ball.r);
+          blackPanel.addColorStop(0, "#2b2b2b");
+          blackPanel.addColorStop(1, "#050505");
 
+          ctx.fillStyle = blackPanel;
+          drawPolygon(5, ball.r * 0.36);
+          ctx.fill();
+          ctx.strokeStyle = panelStroke;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
+          const ringRadius = ball.r * 0.62;
           for (let i = 0; i < 5; i += 1) {
             const angle = (Math.PI * 2 * i) / 5 - Math.PI / 2;
-            const ringRadius = ball.r * 0.63;
             ctx.save();
             ctx.translate(Math.cos(angle) * ringRadius, Math.sin(angle) * ringRadius);
             ctx.rotate(angle);
-            drawPentagon(ball.r * 0.22);
+            drawPolygon(5, ball.r * 0.22);
+            ctx.fill();
+            ctx.stroke();
             ctx.restore();
           }
 
-          ctx.strokeStyle = "rgba(17, 17, 17, 0.4)";
+          ctx.strokeStyle = "rgba(140, 140, 140, 0.5)";
           ctx.lineWidth = 1;
           for (let i = 0; i < 5; i += 1) {
             const angle = (Math.PI * 2 * i) / 5 - Math.PI / 2;
             ctx.beginPath();
-            ctx.moveTo(0, 0);
-            ctx.lineTo(Math.cos(angle) * ball.r * 0.63, Math.sin(angle) * ball.r * 0.63);
+            ctx.moveTo(Math.cos(angle) * ball.r * 0.12, Math.sin(angle) * ball.r * 0.12);
+            ctx.lineTo(Math.cos(angle) * ringRadius, Math.sin(angle) * ringRadius);
             ctx.stroke();
           }
 
+          ctx.globalCompositeOperation = "multiply";
+          const shade = ctx.createRadialGradient(
+            ball.r * 0.25,
+            ball.r * 0.35,
+            ball.r * 0.2,
+            0,
+            0,
+            ball.r * 1.1
+          );
+          shade.addColorStop(0, "rgba(0, 0, 0, 0)");
+          shade.addColorStop(1, "rgba(0, 0, 0, 0.18)");
+          ctx.fillStyle = shade;
+          ctx.beginPath();
+          ctx.arc(0, 0, ball.r, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.globalCompositeOperation = "screen";
+          const highlight = ctx.createRadialGradient(
+            -ball.r * 0.35,
+            -ball.r * 0.35,
+            ball.r * 0.05,
+            -ball.r * 0.35,
+            -ball.r * 0.35,
+            ball.r * 0.45
+          );
+          highlight.addColorStop(0, "rgba(255, 255, 255, 0.9)");
+          highlight.addColorStop(1, "rgba(255, 255, 255, 0)");
+          ctx.fillStyle = highlight;
+          ctx.beginPath();
+          ctx.arc(0, 0, ball.r, 0, Math.PI * 2);
+          ctx.fill();
+
           ctx.restore();
+          ctx.globalCompositeOperation = "source-over";
         };
 
         const drawGround = () => {
@@ -232,6 +301,7 @@
         const render = () => {
           ctx.clearRect(0, 0, width, height);
           drawGround();
+          drawShadow();
           drawBall();
         };
 
