@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Keepy Uppy — Minimal Juggle</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@400;600&family=Syne:wght@400;600&display=swap");
+
+      :root {
+        --bg: #ffffff;
+        --ink: #0b0b0b;
+        --ink-soft: #3f3f3f;
+        --line: #e7e7e7;
+        --shadow: rgba(0, 0, 0, 0.12);
+        --haze: rgba(0, 0, 0, 0.03);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: "Syne", "Avenir Next", sans-serif;
+        overflow: hidden;
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background: radial-gradient(circle at top left, var(--haze), transparent 55%),
+          radial-gradient(circle at 80% 10%, rgba(0, 0, 0, 0.04), transparent 40%),
+          repeating-linear-gradient(
+            90deg,
+            transparent 0,
+            transparent 28px,
+            rgba(0, 0, 0, 0.02) 28px,
+            rgba(0, 0, 0, 0.02) 29px
+          );
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      .stage {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        display: grid;
+        place-items: center;
+      }
+
+      canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+        cursor: pointer;
+        touch-action: none;
+      }
+
+      .hud {
+        position: absolute;
+        top: 26px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 40px;
+        padding: 12px 20px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.88);
+        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.06);
+        backdrop-filter: blur(6px);
+        z-index: 2;
+      }
+
+      .stat {
+        display: grid;
+        gap: 4px;
+        justify-items: center;
+        min-width: 80px;
+      }
+
+      .stat .label {
+        font-family: "Azeret Mono", "SFMono-Regular", monospace;
+        font-size: 11px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+      }
+
+      .stat .value {
+        font-size: 28px;
+        font-weight: 600;
+      }
+
+      .prompt {
+        position: absolute;
+        bottom: 38px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 10px 18px;
+        border-radius: 999px;
+        border: 1px dashed var(--line);
+        color: var(--ink-soft);
+        background: rgba(255, 255, 255, 0.82);
+        font-size: 15px;
+        letter-spacing: 0.02em;
+        transition: opacity 0.3s ease, transform 0.3s ease;
+        z-index: 2;
+      }
+
+      .prompt.hidden {
+        opacity: 0;
+        transform: translate(-50%, 10px);
+        pointer-events: none;
+      }
+
+      .watermark {
+        position: absolute;
+        top: 26px;
+        right: 32px;
+        font-family: "Azeret Mono", "SFMono-Regular", monospace;
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+        z-index: 2;
+      }
+
+      @media (max-width: 720px) {
+        .hud {
+          top: 18px;
+          gap: 24px;
+          padding: 10px 16px;
+        }
+
+        .stat .value {
+          font-size: 22px;
+        }
+
+        .prompt {
+          bottom: 24px;
+          font-size: 14px;
+        }
+
+        .watermark {
+          right: 16px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="stage">
+      <canvas id="game" aria-label="Soccer juggling game"></canvas>
+      <div class="hud" aria-live="polite">
+        <div class="stat">
+          <div class="label">Score</div>
+          <div class="value" id="score">0</div>
+        </div>
+        <div class="stat">
+          <div class="label">Best</div>
+          <div class="value" id="best">0</div>
+        </div>
+      </div>
+      <div class="watermark">Keepy Uppy</div>
+      <div class="prompt" id="prompt">Click the ball to start</div>
+    </main>
+
+    <script>
+      (() => {
+        const canvas = document.getElementById("game");
+        const ctx = canvas.getContext && canvas.getContext("2d");
+        const scoreEl = document.getElementById("score");
+        const bestEl = document.getElementById("best");
+        const promptEl = document.getElementById("prompt");
+
+        const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+        const computeHorizontalImpulse = (clickX, ballX, radius, strength) => {
+          const normalized = clamp((clickX - ballX) / radius, -1, 1);
+          return -normalized * strength;
+        };
+        const isBallHit = (clickX, clickY, ball) => {
+          const dx = clickX - ball.x;
+          const dy = clickY - ball.y;
+          return Math.hypot(dx, dy) <= ball.radius;
+        };
+
+        window.__JUGGLE__ = { clamp, computeHorizontalImpulse, isBallHit };
+
+        if (!ctx) {
+          return;
+        }
+
+        const state = {
+          status: "idle",
+          score: 0,
+          best: 0,
+          flash: 0,
+          flashX: 0,
+        };
+
+        const settings = {
+          gravity: 1800,
+          kick: 860,
+          horizontalKick: 520,
+          wallBounce: 0.68,
+          flashDuration: 0.2,
+        };
+
+        const ball = {
+          x: 0,
+          y: 0,
+          vx: 0,
+          vy: 0,
+          radius: 28,
+          spin: 0,
+        };
+
+        let width = 0;
+        let height = 0;
+        let groundY = 0;
+        let lastTime = performance.now();
+
+        const highScoreKey = "keepyUppyHighScore";
+
+        const loadHighScore = () => {
+          const stored = Number.parseInt(localStorage.getItem(highScoreKey) || "0", 10);
+          state.best = Number.isNaN(stored) ? 0 : stored;
+          bestEl.textContent = String(state.best);
+        };
+
+        const saveHighScore = () => {
+          localStorage.setItem(highScoreKey, String(state.best));
+        };
+
+        const syncHud = () => {
+          scoreEl.textContent = String(state.score);
+          bestEl.textContent = String(state.best);
+        };
+
+        const resetBall = () => {
+          ball.x = width * 0.5;
+          ball.y = groundY - ball.radius;
+          ball.vx = 0;
+          ball.vy = 0;
+          ball.spin = 0;
+        };
+
+        const resetGame = () => {
+          state.status = "idle";
+          state.score = 0;
+          promptEl.classList.remove("hidden");
+          resetBall();
+          syncHud();
+        };
+
+        const resize = () => {
+          const dpr = window.devicePixelRatio || 1;
+          const rect = canvas.getBoundingClientRect();
+          width = rect.width;
+          height = rect.height;
+          canvas.width = width * dpr;
+          canvas.height = height * dpr;
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          ball.radius = Math.max(22, Math.min(width, height) * 0.045);
+          groundY = height - Math.max(48, height * 0.08);
+          resetBall();
+        };
+
+        const drawBall = () => {
+          ctx.save();
+          ctx.translate(ball.x, ball.y);
+          ctx.rotate(ball.spin);
+
+          ctx.beginPath();
+          ctx.arc(0, 0, ball.radius, 0, Math.PI * 2);
+          ctx.fillStyle = "#ffffff";
+          ctx.shadowColor = "rgba(0, 0, 0, 0.2)";
+          ctx.shadowBlur = 14;
+          ctx.shadowOffsetY = 6;
+          ctx.fill();
+          ctx.shadowColor = "transparent";
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = "#0b0b0b";
+          ctx.stroke();
+
+          const patchRadius = ball.radius * 0.45;
+          ctx.fillStyle = "#0b0b0b";
+          ctx.beginPath();
+          for (let i = 0; i < 5; i += 1) {
+            const angle = (Math.PI * 2 * i) / 5 - Math.PI / 2;
+            const x = Math.cos(angle) * patchRadius * 0.55;
+            const y = Math.sin(angle) * patchRadius * 0.55;
+            ctx.lineTo(x, y);
+          }
+          ctx.closePath();
+          ctx.fill();
+
+          for (let i = 0; i < 5; i += 1) {
+            const angle = (Math.PI * 2 * i) / 5 - Math.PI / 2;
+            const x = Math.cos(angle) * patchRadius;
+            const y = Math.sin(angle) * patchRadius;
+            ctx.beginPath();
+            ctx.arc(x, y, ball.radius * 0.16, 0, Math.PI * 2);
+            ctx.fill();
+          }
+
+          ctx.restore();
+        };
+
+        const drawGround = () => {
+          ctx.save();
+          ctx.strokeStyle = "#dedede";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(0, groundY + 1);
+          ctx.lineTo(width, groundY + 1);
+          ctx.stroke();
+          ctx.restore();
+        };
+
+        const drawFlash = () => {
+          if (state.flash <= 0) {
+            return;
+          }
+
+          ctx.save();
+          ctx.globalAlpha = Math.min(state.flash / settings.flashDuration, 1);
+          ctx.strokeStyle = "#0b0b0b";
+          ctx.lineWidth = 3;
+          const flashX = state.flashX || ball.x;
+          ctx.beginPath();
+          ctx.moveTo(flashX - ball.radius * 1.4, groundY + 2);
+          ctx.lineTo(flashX + ball.radius * 1.4, groundY + 2);
+          ctx.stroke();
+          ctx.restore();
+        };
+
+        const render = () => {
+          ctx.clearRect(0, 0, width, height);
+          drawGround();
+          drawFlash();
+          drawBall();
+        };
+
+        const applyKick = (clickX) => {
+          const impulse = computeHorizontalImpulse(
+            clickX,
+            ball.x,
+            ball.radius,
+            settings.horizontalKick
+          );
+          ball.vx += impulse;
+          ball.vy = -settings.kick;
+          state.score += 1;
+          if (state.score > state.best) {
+            state.best = state.score;
+            saveHighScore();
+          }
+          syncHud();
+        };
+
+        const handlePointer = (event) => {
+          const rect = canvas.getBoundingClientRect();
+          const clickX = event.clientX - rect.left;
+          const clickY = event.clientY - rect.top;
+
+          if (!isBallHit(clickX, clickY, ball)) {
+            return;
+          }
+
+          if (state.status === "idle") {
+            state.status = "active";
+            promptEl.classList.add("hidden");
+          }
+
+          applyKick(clickX);
+        };
+
+        const update = (time) => {
+          const delta = Math.min(0.032, (time - lastTime) / 1000);
+          lastTime = time;
+
+          if (state.status === "active") {
+            ball.vy += settings.gravity * delta;
+            ball.x += ball.vx * delta;
+            ball.y += ball.vy * delta;
+            ball.spin += (ball.vx / ball.radius) * delta * 0.6;
+
+            if (ball.x - ball.radius <= 0) {
+              ball.x = ball.radius;
+              ball.vx = Math.abs(ball.vx) * settings.wallBounce;
+            }
+
+            if (ball.x + ball.radius >= width) {
+              ball.x = width - ball.radius;
+              ball.vx = -Math.abs(ball.vx) * settings.wallBounce;
+            }
+
+            if (ball.y + ball.radius >= groundY) {
+              ball.y = groundY - ball.radius;
+              ball.vy = 0;
+              ball.vx *= 0.4;
+              state.flash = settings.flashDuration;
+              state.flashX = ball.x;
+              resetGame();
+            }
+          }
+
+          if (state.flash > 0) {
+            state.flash = Math.max(0, state.flash - delta);
+          }
+
+          render();
+          requestAnimationFrame(update);
+        };
+
+        window.addEventListener("resize", () => {
+          resize();
+          render();
+        });
+
+        canvas.addEventListener("pointerdown", handlePointer);
+
+        loadHighScore();
+        resize();
+        render();
+        requestAnimationFrame(update);
+      })();
+    </script>
+  </body>
+</html>

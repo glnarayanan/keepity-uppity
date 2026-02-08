@@ -1,0 +1,23 @@
+{
+  "name": "keepy-uppity",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Minimalist soccer juggling game in a single HTML file.",
+  "type": "commonjs",
+  "scripts": {
+    "lint": "eslint --ext .js,.html .",
+    "format": "prettier --write .",
+    "test": "jest"
+  },
+  "devDependencies": {
+    "eslint": "^9.19.0",
+    "eslint-plugin-html": "^8.1.2",
+    "jest": "^29.7.0",
+    "jsdom": "^24.0.0",
+    "prettier": "^3.2.5"
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "testMatch": ["**/tests/**/*.test.js"]
+  }
+}
