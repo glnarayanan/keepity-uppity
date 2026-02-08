@@ -13,7 +13,7 @@ Single-file browser game (HTML5 Canvas + vanilla JS). Soccer juggling simulator.
 |------|---------|
 | `documentation/prd.md` | Product requirements |
 | `documentation/README.md` | Project overview |
-| `documentation/warp.md` | Change log |
+| `documentation/changelog.md` | Change log |
 
 ## Design Context
 
