@@ -9,3 +9,5 @@ A minimalist soccer juggling simulator built in a single HTML file with Canvas a
 - Open `index.html` directly in a modern browser.
 - Click or tap the ball to keep it up.
 - High score persists via `localStorage`.
+
+[![pages-build-deployment](https://github.com/glnarayanan/keepity-uppity/actions/workflows/pages/pages-build-deployment/badge.svg)](https://github.com/glnarayanan/keepity-uppity/actions/workflows/pages/pages-build-deployment)
