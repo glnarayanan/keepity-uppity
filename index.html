@@ -15,18 +15,20 @@
         box-sizing: border-box;
       }
 
-      body {
+      html, body {
         margin: 0;
+        height: 100%;
+        overflow: hidden;
+      }
+
+      body {
         background: var(--bg);
         color: var(--ink);
         font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-        overflow: hidden;
       }
 
       canvas {
         display: block;
-        width: 100vw;
-        height: 100vh;
         cursor: pointer;
         touch-action: none;
       }
@@ -48,7 +50,7 @@
 
       #hint {
         position: fixed;
-        bottom: 38px;
+        bottom: 58px;
         left: 50%;
         transform: translateX(-50%);
         font-size: 14px;
@@ -485,12 +487,17 @@
         const resize = () => {
           const dpr = window.devicePixelRatio || 1;
           width = window.innerWidth;
-          height = window.innerHeight;
+          height = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+          canvas.style.width = width + "px";
+          canvas.style.height = height + "px";
           canvas.width = width * dpr;
           canvas.height = height * dpr;
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-          ball.r = Math.max(20, Math.min(width, height) * 0.045);
-          groundY = height - Math.max(40, height * 0.08);
+          const isMobile = width < 600;
+          ball.r = isMobile
+            ? Math.max(28, Math.min(width, height) * 0.06)
+            : Math.max(20, Math.min(width, height) * 0.045);
+          groundY = height - Math.max(80, height * 0.11);
           resetBall();
         };
 
@@ -783,6 +790,13 @@
           resize();
           render(performance.now(), 0);
         });
+
+        if (window.visualViewport) {
+          window.visualViewport.addEventListener("resize", () => {
+            resize();
+            render(performance.now(), 0);
+          });
+        }
 
         canvas.addEventListener("pointerdown", handlePointer);
 
