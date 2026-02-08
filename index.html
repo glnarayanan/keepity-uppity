@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Keepy Uppy</title>
+    <title>Keepity Uppity</title>
     <style>
       :root {
         --bg: #f6f1e7;
@@ -59,6 +59,26 @@
       #hint.hidden {
         opacity: 0;
       }
+
+      @keyframes scorePop {
+        0% { transform: scale(1); }
+        40% { transform: scale(1.35); }
+        70% { transform: scale(0.95); }
+        100% { transform: scale(1); }
+      }
+
+      #score.pop {
+        animation: scorePop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+      }
+
+      @keyframes bestGlow {
+        0%, 100% { color: inherit; }
+        50% { color: #c8956c; }
+      }
+
+      #best.glow {
+        animation: bestGlow 0.8s ease-in-out 3;
+      }
     </style>
   </head>
   <body>
@@ -67,7 +87,7 @@
       <div>Score <span id="score">0</span></div>
       <div>Best <span id="best">0</span></div>
     </div>
-    <div id="hint">Click the ball to start</div>
+    <div id="hint">Click/tap the ball to start</div>
 
     <script>
       (() => {
@@ -78,10 +98,82 @@
         const hintEl = document.getElementById("hint");
 
         const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
-        const vibrate = (pattern) => {
-          if (navigator.vibrate) {
-            navigator.vibrate(pattern);
-          }
+        // --- Web Audio: warm kick & thud sounds ---
+        let audioCtx = null;
+        const initAudio = () => {
+          if (audioCtx) return;
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        };
+
+        const playKickSound = () => {
+          if (!audioCtx) return;
+          const now = audioCtx.currentTime;
+          const duration = 0.055 + Math.random() * 0.015;
+          const bufferSize = Math.ceil(audioCtx.sampleRate * duration);
+          const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+          const data = buffer.getChannelData(0);
+          for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
+          const source = audioCtx.createBufferSource();
+          source.buffer = buffer;
+
+          const filter = audioCtx.createBiquadFilter();
+          filter.type = "bandpass";
+          filter.frequency.value = 500 + Math.random() * 300;
+          filter.Q.value = 1.2;
+
+          const gain = audioCtx.createGain();
+          gain.gain.setValueAtTime(0.18, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+          source.connect(filter).connect(gain).connect(audioCtx.destination);
+          source.start(now);
+          source.stop(now + duration);
+        };
+
+        const playThudSound = () => {
+          if (!audioCtx) return;
+          const now = audioCtx.currentTime;
+          const duration = 0.08;
+          const bufferSize = Math.ceil(audioCtx.sampleRate * duration);
+          const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+          const data = buffer.getChannelData(0);
+          for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
+          const source = audioCtx.createBufferSource();
+          source.buffer = buffer;
+
+          const filter = audioCtx.createBiquadFilter();
+          filter.type = "bandpass";
+          filter.frequency.value = 200 + Math.random() * 100;
+          filter.Q.value = 0.8;
+
+          const gain = audioCtx.createGain();
+          gain.gain.setValueAtTime(0.12, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+          source.connect(filter).connect(gain).connect(audioCtx.destination);
+          source.start(now);
+          source.stop(now + duration);
+        };
+
+        const playRecordChime = () => {
+          if (!audioCtx) return;
+          const now = audioCtx.currentTime;
+          // Two gentle sine tones a fifth apart for a warm chime
+          [520, 780].forEach((freq, i) => {
+            const osc = audioCtx.createOscillator();
+            osc.type = "sine";
+            osc.frequency.value = freq;
+            const gain = audioCtx.createGain();
+            const start = now + i * 0.06;
+            gain.gain.setValueAtTime(0, start);
+            gain.gain.linearRampToValueAtTime(0.08, start + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.001, start + 0.25);
+            osc.connect(gain).connect(audioCtx.destination);
+            osc.start(start);
+            osc.stop(start + 0.25);
+          });
         };
 
         const state = {
@@ -89,6 +181,8 @@
           score: 0,
           best: 0,
           settleTime: 0,
+          bgWarmth: 0,
+          newRecord: false,
         };
 
         const settings = {
@@ -110,12 +204,197 @@
           spin: 0,
         };
 
+        const particles = [];
+        const particleColors = ["#d4c4a8", "#c9b896", "#bfae8a", "#e0d5c0"];
+        const PARTICLE_MAX = 40;
+
+        const spawnParticles = (x, y, count, config) => {
+          for (let i = 0; i < count && particles.length < PARTICLE_MAX; i++) {
+            const angle = config.angleBase + (Math.random() - 0.5) * config.spread;
+            const speed = config.speed * (0.6 + Math.random() * 0.8);
+            particles.push({
+              x,
+              y,
+              vx: Math.cos(angle) * speed,
+              vy: Math.sin(angle) * speed,
+              life: config.life,
+              maxLife: config.life,
+              r: 2 + Math.random() * 2.5,
+              color: particleColors[(Math.random() * particleColors.length) | 0],
+              gravity: config.gravity || 400,
+            });
+          }
+        };
+
+        const milestones = {
+          5: "Nice.",
+          10: "Smooth...",
+          25: "In the zone",
+          50: "Flow state",
+          100: "Legend",
+          200: "Transcendent",
+        };
+        let activeToast = null;
+
+        const triggerToast = (text) => {
+          activeToast = {
+            text,
+            elapsed: 0,
+            duration: 1.8,
+            x: width * 0.5,
+            y: height * 0.45,
+          };
+        };
+
+        const drawToast = (delta) => {
+          if (!activeToast) return;
+          activeToast.elapsed += delta;
+          const t = activeToast.elapsed / activeToast.duration;
+          if (t >= 1) {
+            activeToast = null;
+            return;
+          }
+          const fadeIn = Math.min(t / 0.15, 1);
+          const fadeOut = Math.min((1 - t) / 0.25, 1);
+          const alpha = Math.min(fadeIn, fadeOut) * 0.6;
+          const yOffset = t * 30;
+
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.font = '300 22px "Helvetica Neue", Helvetica, Arial, sans-serif';
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillStyle = "#8a7e6b";
+          ctx.fillText(activeToast.text, activeToast.x, activeToast.y - yOffset);
+          ctx.restore();
+        };
+
+        const ballPatternCanvas = document.createElement("canvas");
+        const ballPatternSize = 256;
+        ballPatternCanvas.width = ballPatternSize;
+        ballPatternCanvas.height = ballPatternSize;
+
+        const renderBallPattern = () => {
+          const bctx = ballPatternCanvas.getContext("2d");
+          const c = ballPatternSize / 2;
+          const R = c - 2;
+          const s = R / 98;
+          const tx = (x) => c + (x - 100) * s;
+          const ty = (y) => c + (y - 100) * s;
+
+          const pV = [];
+          const rV = [];
+          const ang = [];
+          for (let i = 0; i < 5; i++) {
+            const a = ((-90 + 72 * i) * Math.PI) / 180;
+            ang.push(a);
+            pV.push([100 + 35 * Math.cos(a), 100 + 35 * Math.sin(a)]);
+            rV.push([100 + 76 * Math.cos(a), 100 + 76 * Math.sin(a)]);
+          }
+
+          const hA = [];
+          const hB = [];
+          for (let i = 0; i < 5; i++) {
+            const midA = ((-54 + 72 * i) * Math.PI) / 180;
+            const off = (13 * Math.PI) / 180;
+            hA.push([
+              100 + 95 * Math.cos(midA - off),
+              100 + 95 * Math.sin(midA - off),
+            ]);
+            hB.push([
+              100 + 95 * Math.cos(midA + off),
+              100 + 95 * Math.sin(midA + off),
+            ]);
+          }
+
+          bctx.beginPath();
+          bctx.arc(c, c, R, 0, Math.PI * 2);
+          bctx.fillStyle = "#f0f0f0";
+          bctx.fill();
+
+          bctx.save();
+          bctx.beginPath();
+          bctx.arc(c, c, R, 0, Math.PI * 2);
+          bctx.clip();
+
+          for (let i = 0; i < 5; i++) {
+            const a = ang[i];
+            const prev = hB[(i - 1 + 5) % 5];
+            const next = hA[i];
+            bctx.beginPath();
+            bctx.moveTo(tx(rV[i][0]), ty(rV[i][1]));
+            bctx.lineTo(tx(next[0]), ty(next[1]));
+            bctx.lineTo(
+              tx(100 + 140 * Math.cos(a + 0.28)),
+              ty(100 + 140 * Math.sin(a + 0.28))
+            );
+            bctx.lineTo(
+              tx(100 + 150 * Math.cos(a)),
+              ty(100 + 150 * Math.sin(a))
+            );
+            bctx.lineTo(
+              tx(100 + 140 * Math.cos(a - 0.28)),
+              ty(100 + 140 * Math.sin(a - 0.28))
+            );
+            bctx.lineTo(tx(prev[0]), ty(prev[1]));
+            bctx.closePath();
+            bctx.fillStyle = "#1a1a1a";
+            bctx.fill();
+          }
+
+          bctx.beginPath();
+          bctx.moveTo(tx(pV[0][0]), ty(pV[0][1]));
+          for (let i = 1; i < 5; i++)
+            bctx.lineTo(tx(pV[i][0]), ty(pV[i][1]));
+          bctx.closePath();
+          bctx.fillStyle = "#1a1a1a";
+          bctx.fill();
+
+          bctx.strokeStyle = "#888";
+          bctx.lineWidth = 1.5 * s;
+          bctx.lineJoin = "round";
+          bctx.lineCap = "round";
+
+          bctx.beginPath();
+          bctx.moveTo(tx(pV[0][0]), ty(pV[0][1]));
+          for (let i = 1; i < 5; i++)
+            bctx.lineTo(tx(pV[i][0]), ty(pV[i][1]));
+          bctx.closePath();
+          bctx.stroke();
+
+          for (let i = 0; i < 5; i++) {
+            bctx.beginPath();
+            bctx.moveTo(tx(pV[i][0]), ty(pV[i][1]));
+            bctx.lineTo(tx(rV[i][0]), ty(rV[i][1]));
+            bctx.stroke();
+
+            bctx.beginPath();
+            bctx.moveTo(tx(rV[i][0]), ty(rV[i][1]));
+            bctx.lineTo(tx(hB[(i - 1 + 5) % 5][0]), ty(hB[(i - 1 + 5) % 5][1]));
+            bctx.stroke();
+
+            bctx.beginPath();
+            bctx.moveTo(tx(rV[i][0]), ty(rV[i][1]));
+            bctx.lineTo(tx(hA[i][0]), ty(hA[i][1]));
+            bctx.stroke();
+
+            bctx.beginPath();
+            bctx.moveTo(tx(hA[i][0]), ty(hA[i][1]));
+            bctx.lineTo(tx(hB[i][0]), ty(hB[i][1]));
+            bctx.stroke();
+          }
+
+          bctx.restore();
+        };
+
+        renderBallPattern();
+
         let width = 0;
         let height = 0;
         let groundY = 0;
         let lastTime = performance.now();
 
-        const highScoreKey = "keepyUppyHighScore";
+        const highScoreKey = "keepityUppityHighScore";
 
         const loadHighScore = () => {
           try {
@@ -148,7 +427,29 @@
           ball.spin = 0;
         };
 
+        const goldParticleColors = ["#d4a84b", "#c89640", "#e0be6a", "#b8883a"];
+
         const resetGame = () => {
+          if (state.newRecord) {
+            triggerToast("New best!");
+            // Golden particle burst from ball position
+            for (let i = 0; i < 18; i++) {
+              const angle = (Math.PI * 2 * i) / 18;
+              const speed = 100 + Math.random() * 80;
+              particles.push({
+                x: ball.x,
+                y: ball.y,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                life: 0.6 + Math.random() * 0.3,
+                maxLife: 0.9,
+                r: 2.5 + Math.random() * 2,
+                color: goldParticleColors[(Math.random() * goldParticleColors.length) | 0],
+                gravity: 200,
+              });
+            }
+          }
+          state.newRecord = false;
           state.mode = "idle";
           state.score = 0;
           state.settleTime = 0;
@@ -169,15 +470,6 @@
           resetBall();
         };
 
-        const drawPolygon = (sides, radius) => {
-          ctx.beginPath();
-          for (let i = 0; i < sides; i += 1) {
-            const angle = (Math.PI * 2 * i) / sides - Math.PI / 2;
-            ctx.lineTo(Math.cos(angle) * radius, Math.sin(angle) * radius);
-          }
-          ctx.closePath();
-        };
-
         const drawShadow = () => {
           const height = clamp((groundY - (ball.y + ball.r)) / (ball.r * 3), 0, 1);
           const shadowScale = 1 - height * 0.5;
@@ -192,76 +484,47 @@
           ctx.restore();
         };
 
-        const drawBall = () => {
+        const drawBall = (time) => {
           ctx.save();
           ctx.translate(ball.x, ball.y);
-          ctx.rotate(ball.spin);
 
-          const baseGradient = ctx.createRadialGradient(
-            -ball.r * 0.35,
-            -ball.r * 0.35,
-            ball.r * 0.2,
-            0,
-            0,
-            ball.r * 1.2
+          if (state.mode === "idle") {
+            const breathe = 1 + Math.sin(time * 0.003) * 0.015;
+            ctx.scale(breathe, breathe);
+          }
+
+          ctx.save();
+          ctx.rotate(ball.spin);
+          ctx.beginPath();
+          ctx.arc(0, 0, ball.r, 0, Math.PI * 2);
+          ctx.clip();
+          ctx.drawImage(
+            ballPatternCanvas,
+            -ball.r,
+            -ball.r,
+            ball.r * 2,
+            ball.r * 2
           );
-          baseGradient.addColorStop(0, "#ffffff");
-          baseGradient.addColorStop(0.6, "#f0f0f0");
-          baseGradient.addColorStop(1, "#d7d7d7");
+          ctx.restore();
 
           ctx.beginPath();
           ctx.arc(0, 0, ball.r, 0, Math.PI * 2);
-          ctx.fillStyle = baseGradient;
-          ctx.fill();
-          ctx.lineWidth = 2;
-          ctx.strokeStyle = "#111111";
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = "#444";
           ctx.stroke();
-
-          const panelStroke = "rgba(120, 120, 120, 0.55)";
-          const blackPanel = ctx.createLinearGradient(-ball.r, -ball.r, ball.r, ball.r);
-          blackPanel.addColorStop(0, "#2b2b2b");
-          blackPanel.addColorStop(1, "#050505");
-
-          ctx.fillStyle = blackPanel;
-          drawPolygon(5, ball.r * 0.36);
-          ctx.fill();
-          ctx.strokeStyle = panelStroke;
-          ctx.lineWidth = 1;
-          ctx.stroke();
-
-          const ringRadius = ball.r * 0.62;
-          for (let i = 0; i < 5; i += 1) {
-            const angle = (Math.PI * 2 * i) / 5 - Math.PI / 2;
-            ctx.save();
-            ctx.translate(Math.cos(angle) * ringRadius, Math.sin(angle) * ringRadius);
-            ctx.rotate(angle);
-            drawPolygon(5, ball.r * 0.22);
-            ctx.fill();
-            ctx.stroke();
-            ctx.restore();
-          }
-
-          ctx.strokeStyle = "rgba(140, 140, 140, 0.5)";
-          ctx.lineWidth = 1;
-          for (let i = 0; i < 5; i += 1) {
-            const angle = (Math.PI * 2 * i) / 5 - Math.PI / 2;
-            ctx.beginPath();
-            ctx.moveTo(Math.cos(angle) * ball.r * 0.12, Math.sin(angle) * ball.r * 0.12);
-            ctx.lineTo(Math.cos(angle) * ringRadius, Math.sin(angle) * ringRadius);
-            ctx.stroke();
-          }
 
           ctx.globalCompositeOperation = "multiply";
           const shade = ctx.createRadialGradient(
             ball.r * 0.25,
             ball.r * 0.35,
-            ball.r * 0.2,
+            ball.r * 0.1,
             0,
             0,
-            ball.r * 1.1
+            ball.r
           );
           shade.addColorStop(0, "rgba(0, 0, 0, 0)");
-          shade.addColorStop(1, "rgba(0, 0, 0, 0.18)");
+          shade.addColorStop(0.7, "rgba(0, 0, 0, 0.04)");
+          shade.addColorStop(1, "rgba(0, 0, 0, 0.22)");
           ctx.fillStyle = shade;
           ctx.beginPath();
           ctx.arc(0, 0, ball.r, 0, Math.PI * 2);
@@ -269,14 +532,14 @@
 
           ctx.globalCompositeOperation = "screen";
           const highlight = ctx.createRadialGradient(
-            -ball.r * 0.35,
-            -ball.r * 0.35,
-            ball.r * 0.05,
-            -ball.r * 0.35,
-            -ball.r * 0.35,
-            ball.r * 0.45
+            -ball.r * 0.32,
+            -ball.r * 0.32,
+            ball.r * 0.03,
+            -ball.r * 0.32,
+            -ball.r * 0.32,
+            ball.r * 0.5
           );
-          highlight.addColorStop(0, "rgba(255, 255, 255, 0.9)");
+          highlight.addColorStop(0, "rgba(255, 255, 255, 0.85)");
           highlight.addColorStop(1, "rgba(255, 255, 255, 0)");
           ctx.fillStyle = highlight;
           ctx.beginPath();
@@ -298,36 +561,92 @@
           ctx.restore();
         };
 
-        const render = () => {
-          ctx.clearRect(0, 0, width, height);
-          drawGround();
-          drawShadow();
-          drawBall();
+        const drawParticles = () => {
+          for (const p of particles) {
+            const alpha = (p.life / p.maxLife) * 0.7;
+            ctx.globalAlpha = alpha;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.r * (p.life / p.maxLife), 0, Math.PI * 2);
+            ctx.fillStyle = p.color;
+            ctx.fill();
+          }
+          ctx.globalAlpha = 1;
         };
 
-        const applyKick = (clickX, clickY, pressure) => {
+        // --- Progressive background warmth ---
+        // Base: #f6f1e7 = (246,241,231), warm target: (251,238,219)
+        const bgBase = [246, 241, 231];
+        const bgWarm = [251, 238, 219];
+
+        const getBgColor = (warmth) => {
+          const r = Math.round(bgBase[0] + (bgWarm[0] - bgBase[0]) * warmth);
+          const g = Math.round(bgBase[1] + (bgWarm[1] - bgBase[1]) * warmth);
+          const b = Math.round(bgBase[2] + (bgWarm[2] - bgBase[2]) * warmth);
+          return `rgb(${r},${g},${b})`;
+        };
+
+        const render = (time, delta) => {
+          // Smoothly interpolate background warmth toward target
+          const targetWarmth = state.mode === "active" ? clamp(state.score / 40, 0, 1) : 0;
+          state.bgWarmth += (targetWarmth - state.bgWarmth) * Math.min(1, delta * 3);
+
+          const bgColor = getBgColor(state.bgWarmth);
+          ctx.fillStyle = bgColor;
+          ctx.fillRect(0, 0, width, height);
+          document.body.style.background = bgColor;
+
+          drawGround();
+          drawShadow();
+          drawParticles();
+          drawBall(time);
+          drawToast(delta);
+        };
+
+        const applyKick = (clickX, clickY) => {
           const dx = clickX - ball.x;
           const dy = clickY - ball.y;
           const distance = Math.hypot(dx, dy);
           const radial = clamp(distance / ball.r, 0, 1);
-          const press = clamp(typeof pressure === "number" ? pressure || 0.5 : 0.5, 0, 1);
-          const boost = 0.75 + radial * 0.55 + press * 0.25;
+          const boost = 0.875 + radial * 0.55;
           const normalizedX = clamp(dx / ball.r, -1, 1);
 
           ball.vx += -normalizedX * settings.sideKick * boost;
           ball.vy = -settings.kick * boost;
+          const wasNotRecord = state.score <= state.best;
           state.score += 1;
 
           if (state.score > state.best) {
             state.best = state.score;
             saveHighScore();
+            if (wasNotRecord) {
+              state.newRecord = true;
+              playRecordChime();
+              bestEl.classList.remove("glow");
+              void bestEl.offsetWidth;
+              bestEl.classList.add("glow");
+            }
           }
 
+          if (milestones[state.score]) triggerToast(milestones[state.score]);
+
+          spawnParticles(ball.x, ball.y + ball.r * 0.5, 6, {
+            angleBase: -Math.PI / 2 + normalizedX * 0.5,
+            spread: Math.PI * 0.8,
+            speed: 180,
+            life: 0.3,
+            gravity: 400,
+          });
+
+          scoreEl.classList.remove("pop");
+          void scoreEl.offsetWidth;
+          scoreEl.classList.add("pop");
+
           syncHud();
-          vibrate(8);
+          playKickSound();
         };
 
         const handlePointer = (event) => {
+          initAudio();
           const rect = canvas.getBoundingClientRect();
           const clickX = event.clientX - rect.left;
           const clickY = event.clientY - rect.top;
@@ -341,19 +660,35 @@
           if (state.mode !== "active") {
             state.mode = "active";
             state.settleTime = 0;
+            if (hintTimer) { clearTimeout(hintTimer); hintTimer = null; }
             hintEl.classList.add("hidden");
           }
 
-          applyKick(clickX, clickY, event.pressure);
+          applyKick(clickX, clickY);
         };
 
+        let hintTimer = null;
+
         const handleGroundImpact = () => {
+          spawnParticles(ball.x, groundY, 8, {
+            angleBase: -Math.PI / 2,
+            spread: Math.PI * 0.6,
+            speed: 120,
+            life: 0.4,
+            gravity: 300,
+          });
+
           if (state.mode === "active") {
             state.mode = "settling";
             state.score = 0;
             syncHud();
-            hintEl.classList.remove("hidden");
-            vibrate(18);
+            playThudSound();
+            // Graceful pause before showing hint again
+            if (hintTimer) clearTimeout(hintTimer);
+            hintTimer = setTimeout(() => {
+              hintEl.classList.remove("hidden");
+              hintTimer = null;
+            }, 400);
           }
         };
 
@@ -407,20 +742,29 @@
             }
           }
 
-          render();
+          for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.vy += p.gravity * delta;
+            p.x += p.vx * delta;
+            p.y += p.vy * delta;
+            p.life -= delta;
+            if (p.life <= 0) particles.splice(i, 1);
+          }
+
+          render(time, delta);
           requestAnimationFrame(update);
         };
 
         window.addEventListener("resize", () => {
           resize();
-          render();
+          render(performance.now(), 0);
         });
 
         canvas.addEventListener("pointerdown", handlePointer);
 
         loadHighScore();
         resize();
-        render();
+        render(performance.now(), 0);
         requestAnimationFrame(update);
       })();
     </script>
